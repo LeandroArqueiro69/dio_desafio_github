@@ -1,0 +1,7 @@
+Comandos cmd Windows 
+cd para abrir diretorio
+dir para mostrar os diretórios
+mkdir para criar um diretório
+del para apagar um arquivo
+rmdir para apagar um acho
+echo + formato para criar um arquivo 

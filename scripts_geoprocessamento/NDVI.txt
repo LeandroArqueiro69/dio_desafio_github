@@ -1,0 +1,56 @@
+//área de estudo
+var area_estudo = ee.FeatureCollection('users/treinamento_GEE_00/ibge_municipios496_ajust')
+                  .filter(ee.Filter.eq('NOME','SAO GABRIEL'))
+
+//Centralizar imagens 
+Map.centerObject(area_estudo,9)
+
+//Mapa de fundo
+Map.setOptions("HYBRID")
+
+//Adicionar São Gabriel 
+Map.addLayer(area_estudo,{color:'blue'},'São Gabriel')
+
+//Função NDVI
+var ndvi_funcao = function(image) {
+  var ndvi= image.normalizedDifference(['B5','B4']).rename('NDVI')
+  return image.addBands(ndvi).clip(area_estudo)
+}
+
+//Importar coleção Landsat
+var l8 = ee.ImageCollection("LANDSAT/LC08/C01/T1_SR")
+              .filterDate('2019-01-01','2020-12-31')
+              .filterMetadata('CLOUD_COVER','less_than',1)
+              .filterBounds(area_estudo)
+              .map(ndvi_funcao)
+              
+var num_image = l8.size()
+print('Número de imagens que estou utilizando',num_image)
+              
+//Adicionar o Layer com NDVI 
+Map.addLayer(l8.select('NDVI'),{min:0 , max:0.89, palette: ['red','orange','yellow','green']},'NDVI São Gabriel')
+
+//Aplicando um redutor para  baixar a imagem
+var red_image = l8.select('NDVI').mean()
+
+// Exportar imagem 
+Export.image.toDrive({
+  image: red_image,
+  folder: 'YOUTUBE',
+  description: 'NDVI_2019_2020',
+  region: area_estudo,
+  scale: 30,
+  maxPixels: 1e13
+  })
+  
+//Gráfico de NDVI para São Gabriel
+var ndvi_chart = ui.Chart.image.seriesByRegion({
+  imageCollection: l8,
+  regions: area_estudo,
+  reducer: ee.Reducer.mean(),
+  band:'NDVI', 
+  scale: 30, 
+  xProperty: 'system:time_start', 
+  seriesProperty: 'NOME'})
+
+print(ndvi_chart)

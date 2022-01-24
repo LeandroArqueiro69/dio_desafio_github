@@ -1,0 +1,112 @@
+var area = ee.FeatureCollection("users/leandrobrunoambientais/Dipro_PA_objid406"),
+    imageCollection = ee.ImageCollection("COPERNICUS/S2_SR");
+
+//// Função para mascarar nuvens usando a banda Sentinel-2 QA.
+function maskS2clouds(image) {
+  var qa = image.select('QA60')
+
+  // Os bits 10 e 11 são nuvens e cirros, respectivamente.
+  var cloudBitMask = 1 << 10;
+  var cirrusBitMask = 1 << 11;
+
+  // Ambos os sinalizadores devem ser definidos como zero, indicando condições claras.
+  var mask = qa.bitwiseAnd(cloudBitMask).eq(0).and(
+             qa.bitwiseAnd(cirrusBitMask).eq(0))
+
+  // Retorne os dados mascarados e dimensionados, sem as bandas de controle de qualidade.
+  return image.updateMask(mask).divide(10000)
+      .select("B.*")
+      .copyProperties(image, ["system:time_start"])
+}
+
+// Composição 
+var collection = ee.ImageCollection("COPERNICUS/S2_SR")
+  .filterDate('2020-01-01', '2020-12-31')
+  .filterBounds(area)
+  .filterMetadata('CLOUDY_PIXEL_PERCENTAGE','less_than',50)// avaliação de cobertura de nuvem
+  .map(maskS2clouds)
+  .map(function(image){
+    var evi = image.expression('2.5 * ((N - R) / (N + (6 * R) - (7.5 * B) + 1))', 
+  { //Huete 2002
+        'N': image.select('B8'), 'R': image.select('B4'), 'B': image.select('B2')}).rename('EVI');
+  return image.addBands([evi]).clip(area)
+    })
+  .select('EVI')
+  
+  // CRIAR LISTA DE MESES PARA UTILIZAR NAS FUNÇÕES 
+var months = ee.List.sequence(1,12);
+// CRIAR LISTA PARA VARIÁVEL YEARS
+var years = ee.List.sequence(2020,2020)
+
+/*************************** NDVI Mensal **********************************/ 
+var Evi_mensal_mean =  ee.ImageCollection.fromImages(  //RETORNA A IMAGEM PARA COLEÇÃO 
+  years.map(function (ano) { // APLICAR A FUNÇÃO MAP (LOOP) PARA  A VARIÁVEL YEARS
+  
+  return months.map(function(mes){ //  returnar a variável months com a seguinte função P:  
+  
+  var Evi_month = collection.filter(ee.Filter.calendarRange(ano, ano, 'year'))  //filtro por ano,
+           .filter(ee.Filter.calendarRange(mes, mes, 'month')) //  filtro por mês
+           .median() // MÉDIA NDVI TODOS OS VALORES DA COLEÇÃO NO MÊS 
+           
+  
+  return Evi_month.set('year', ano) // INTERVALO ANO = Y
+           .set('month', mes) // INTERVALO MONTH = m 
+           .set('date', ee.Date.fromYMD(ano,mes,1)) // DATE É A DATA QUE VEM DE Y ANO, M MÊS E 1 DIA 1.
+           .set('system:time_start',ee.Date.fromYMD(ano,mes,1)); // INTERVALO SYSTEM TIME_START DAS COLEÇÕES
+            })
+            }).flatten()
+          ); /// EMPILHAR COLEÇÕES 
+
+print(Evi_mensal_mean,'Evi médio mensal')
+
+// Add the first image to the map, just as a preview.
+Map.addLayer(Evi_mensal_mean.median(), {min: -0.02, max: 0.40,
+  palette:['red', 'orange', 'yellow', 'green']}, "EVI");
+  
+var visualize = {min: -0.03,max: 0.81,
+            palette: ['red', 'orange', 'yellow', 'green']}
+
+
+
+/**************************Adicionado Mapa de EVI por ano***********/
+Map.addLayer(Evi_mensal_mean, visualize, 'EVI Anual');  
+/********************************Exportando Imagens Anual***********************/
+Export.image.toDrive({
+  image: Evi_mensal_mean,
+  folder: 'GEE',
+  description: 'EVI',
+  region: area,
+  scale: 2500,
+  maxPixels: 1e13
+  })   
+//Fim da função Loop
+
+/*************************Exportando Imagens Mensais***********************/
+var size = Evi_mensal_mean.size() //contar quantas imagens tem
+print('3 - Quantas imagens existem:', size)
+
+//Criando uma lista
+var list = Evi_mensal_mean.toList(size)
+
+// Definindo o intervalo e o download (lado do servidor)
+      for(var i=0;i < 12;++i) //mes 1 ao 12
+    {
+
+//função de exportação onde foram definidos os seguintes parâmetros:
+  var Name = ee.Image(list.get(i)).get('system:index').getInfo(); //nome da imagem
+                  
+  Export.image.toDrive({
+    image:list.get(i), 
+    description:'EVI_mes_'+Name, 
+    region: area,
+    folder:'GEE', //pasta criada no Google Drive onde serão salvas as imagens
+    scale:2500, //
+    maxPixels:1e13  //numero máximos de pixel que podem compor uma imagem. 1^13
+  })
+
+Map.addLayer(ee.Image(list.get(i)), visualize, 'EVI Média Mensal'.concat(Name),0)
+
+}
+
+
+   

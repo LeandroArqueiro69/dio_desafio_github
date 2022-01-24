@@ -1,0 +1,773 @@
+//INSTRUÇÕES DE USO
+//Ao clicar no botão de exportar será habilitado botão de exportação em "TASK"
+//Clicar em "RUN" para executar a exportação da imagem para sua conta do GOOGLE DRIVE
+//Recomenda-se baixar apenas a área de interesse!!!!!
+//A área baixada é delimitada pela visualização do mapa 
+//no momento em que for clicado o botão de exportação.
+//Caso a visualização seja além dos limites da imagem, será gerado um arquivo
+//de fundo preto, aumentando o tamanho do arquivo de forma desnecessária.
+//Reitera-se que seja baixado apenas a área de interesse.
+
+//Acervo do landsat desde 1984, faltam algumas imagens, se necessário baixar imagem pelo USGS
+
+
+var now = Date.now();
+var eeNow = ee.Date(now).advance(1,'days').format('YYYY-MM-dd');
+print('Hoje:', ee.Date(now).format('YYYY-MM-dd'))
+// The namespace for our application.  All the state is kept in here.
+var app = {};
+var map1 = ui.Map()
+var map2 = ui.Map()
+var map3 = ui.Map()
+var map4 = ui.Map()
+
+  var linker = ui.Map.Linker([map1, map2,map3,map4]);
+
+/** Creates the UI panels. */
+app.createPanels = function() 
+{
+  /* The introduction section. */
+  app.intro = {
+    panel: ui.Panel([
+      ui.Label({
+        value: 'Explorador S1 + S2+ L5 + L8 TOA',
+        style: {fontWeight: 'bold', fontSize: '20px', margin: '10px 2px'}
+      }),
+    ])
+  };
+
+  /* The collection filter controls. */
+  
+  app.filters = {
+    byPathRow: ui.Checkbox({label: 'Por órbita/ponto', value: false}),
+    startDate: ui.Textbox('YYYY-MM-DD', '1984-01-01'),
+    endDate: ui.Textbox('YYYY-MM-DD', eeNow.getInfo()),
+    startDate1: ui.Textbox('YYYY-MM-DD', '2016-01-01'), //add
+    endDate1: ui.Textbox('YYYY-MM-DD', eeNow.getInfo()), //add
+    startDate2: ui.Textbox('YYYY-MM-DD', '2015-06-23'),//s2
+    endDate2: ui.Textbox('YYYY-MM-DD', eeNow.getInfo()),//s2
+    startDate3: ui.Textbox('YYYY-MM-DD', '2015-06-23'),//s1
+    endDate3: ui.Textbox('YYYY-MM-DD', eeNow.getInfo()),//s1
+    wrsPath: ui.Textbox('','221'),
+    wrsRow: ui.Textbox('','71'),
+    lon: ui.Textbox('Grau Decimal (-0.00)',''),
+    lat: ui.Textbox('Grau Decimal (-0.00)',''),
+    applyButton: ui.Button('Aplicar filtros', app.applyFilters),
+    applyButtonlonlat: ui.Button('Centralizar Long/Lat', app.applyFilterslonlat),
+
+    loadingLabel: ui.Label({
+      value: 'Lendo...',
+      style: {stretch: 'vertical', color: 'gray', shown: false}
+    })
+    
+  };
+
+  /* The panel for the filter control widgets. */
+  app.filters.panel = ui.Panel({
+    widgets: [
+      ui.Label('1) Selecionar filtros (L5, L8 e S2)', {fontWeight: 'bold'}),
+      ui.Panel([
+        ui.Label('L5 - Data inicial:', app.HELP_TEXT_STYLE), 
+        app.filters.startDate],ui.Panel.Layout.flow('horizontal')),
+      ui.Panel([  
+        ui.Label('L5 - Data final:', app.HELP_TEXT_STYLE), 
+        app.filters.endDate],ui.Panel.Layout.flow('horizontal')),
+     ui.Panel([
+        ui.Label('L8 - Data inicial:', app.HELP_TEXT_STYLE), 
+        app.filters.startDate1],ui.Panel.Layout.flow('horizontal')),
+      ui.Panel([  
+        ui.Label('L8 - Data final:', app.HELP_TEXT_STYLE), 
+        app.filters.endDate1],ui.Panel.Layout.flow('horizontal')),
+     ui.Panel([
+        ui.Label('S2 - Data inicial:', app.HELP_TEXT_STYLE), 
+        app.filters.startDate2],ui.Panel.Layout.flow('horizontal')),
+      ui.Panel([  
+        ui.Label('S2 - Data final:', app.HELP_TEXT_STYLE), 
+        app.filters.endDate2],ui.Panel.Layout.flow('horizontal')),
+        ui.Panel([
+        ui.Label('S1 - Data inicial:', app.HELP_TEXT_STYLE), 
+        app.filters.startDate3],ui.Panel.Layout.flow('horizontal')),
+      ui.Panel([  
+        ui.Label('S1 - Data final:', app.HELP_TEXT_STYLE), 
+        app.filters.endDate3],ui.Panel.Layout.flow('horizontal')),
+      
+    //  ui.Panel([
+    //    ui.Label('Órbita:',app.HELP_TEXT_STYLE),
+    //    app.filters.wrsPath],ui.Panel.Layout.flow('horizontal')),
+    //  ui.Panel([
+    //    ui.Label('Ponto:',app.HELP_TEXT_STYLE),
+    //    app.filters.wrsRow],ui.Panel.Layout.flow('horizontal')),
+    //  app.filters.byPathRow,
+    //  ui.Panel([
+        app.filters.applyButton,
+    //    app.filters.loadingLabel], ui.Panel.Layout.flow('horizontal'))
+     ui.Panel([
+         ui.Label('Longitude:',app.HELP_TEXT_STYLE),
+           app.filters.lon],ui.Panel.Layout.flow('horizontal')),
+         ui.Panel([
+           ui.Label('Latitude:',app.HELP_TEXT_STYLE),
+           app.filters.lat],ui.Panel.Layout.flow('horizontal')),
+         app.filters.applyButtonlonlat,
+    
+    
+    ],
+    style: app.SECTION_STYLE
+  });
+
+  /* The image picker section. */
+  app.picker = {
+    // Create a select with a function that reacts to the "change" event.
+    select: ui.Select({
+      placeholder: 'Selecionar uma imagem (L5)',
+      onChange: app.refreshMapLayer
+    }), 
+    select1: ui.Select({
+      placeholder: 'Selecionar uma imagem (L8)',
+      onChange: app.refreshMapLayer1
+    }),
+    select2: ui.Select({
+      placeholder: 'Selecionar uma imagem (S2)',
+      onChange: app.refreshMapLayer2
+    }),
+    select3: ui.Select({
+      placeholder: 'Selecionar uma imagem (S1)',
+      onChange: app.refreshMapLayer3
+    }),
+
+    // Create a button that centers the map on a given object.
+    centerButton: ui.Button('Centralizar', function() {
+      map1.centerObject(map1.layers().get(0).get('eeObject'));
+    })
+  };
+
+  /* The panel for the picker section with corresponding widgets. */
+  app.picker.panel = ui.Panel({
+    widgets: [
+      ui.Label('2) Selecionar uma imagem (S1, S2, L5 e L8)', {fontWeight: 'bold'}),
+      ui.Label('limite: 50 imagens', {fontWeight: 'lighter'}),
+      ui.Panel([
+        app.picker.select,
+        app.picker.select1,
+        app.picker.select2,
+        app.picker.select3,
+        app.picker.centerButton
+      ], ui.Panel.Layout.flow('vertical'))
+    ],
+    style: app.SECTION_STYLE
+  });
+
+  /* The visualization section. */ 
+  // CUIDADO considerar q sao dois satellites diferentes
+      
+  app.vis = {
+    label: ui.Label(),
+    // Create a select with a function that reacts to the "change" event.
+    select: ui.Select({
+      items: Object.keys(app.VIS_OPTIONS),
+      onChange: function() {
+        // Update the label's value with the select's description.
+        var option = app.VIS_OPTIONS[app.vis.select.getValue()];
+        app.vis.label.setValue(option.description);
+        // Refresh the map layer.
+        app.refreshMapLayer();
+      }
+    }),
+    select1:ui.Select({
+      items: Object.keys(app.VIS_OPTIONS1), 
+      onChange: function() {
+        // Update the label's value with the select's description.
+        var option = app.VIS_OPTIONS1[app.vis.select1.getValue()];
+        app.vis.label.setValue(option.description);
+        // Refresh the map layer.
+        app.refreshMapLayer1();
+      }
+    }),
+    select2:ui.Select({
+      items: Object.keys(app.VIS_OPTIONS2), 
+      onChange: function() {
+        // Update the label's value with the select's description.
+        var option = app.VIS_OPTIONS2[app.vis.select2.getValue()]; 
+        app.vis.label.setValue(option.description);
+        // Refresh the map layer.
+        app.refreshMapLayer2();
+      }
+    })
+    ,
+    select3:ui.Select({
+      items: Object.keys(app.VIS_OPTIONS3), 
+      onChange: function() {
+        // Update the label's value with the select's description.
+        var option = app.VIS_OPTIONS3[app.vis.select3.getValue()]; // alterar p/ 2
+        app.vis.label.setValue(option.description);
+        // Refresh the map layer.
+        app.refreshMapLayer3();// alterar p/ 2
+      }
+    })
+  };
+
+  /* The panel for the visualization section with corresponding widgets. */
+  app.vis.panel = ui.Panel({
+    widgets: [
+      ui.Label('3) Selecionar uma visualização (L5, L8 e S2)', {fontWeight: 'bold'}),
+      app.vis.select,   //L5
+      app.vis.select1,  //L8
+       app.vis.select2, //S2
+       app.vis.select3, //S1
+      app.vis.label
+    ],
+    style: app.SECTION_STYLE
+  });
+
+  // Default the select to the first value.
+  app.vis.select.setValue(app.vis.select.items().get(0));
+  app.vis.select1.setValue(app.vis.select1.items().get(0));// para landsat 8
+  app.vis.select2.setValue(app.vis.select2.items().get(0));// para S2
+  app.vis.select3.setValue(app.vis.select3.items().get(0));// para S1
+
+  /* The export section. */
+  app.export = {
+    button: ui.Button({
+      label: 'L5 Export (RUN TASK)',
+      // React to the button's click event.
+      onClick: function() {
+        // Select the full image id.
+        var imageIdTrailer = app.picker.select.getValue();
+        var imageId = app.COLLECTION_ID + '/' + imageIdTrailer;
+        // Get the visualization options.
+        var visOption = app.VIS_OPTIONS[app.vis.select.getValue()];
+        // Export the image to Drive.
+        
+        var bb =  ee.List(map1.getBounds()) 
+        var r = ee.Geometry.Rectangle([[bb.get(0),bb.get(1)],[bb.get(2),bb.get(3)]])
+        
+        Export.image.toDrive({
+          image: ee.Image(imageId).select(visOption.visParams.bands),
+          description: 'L5_Export-' + imageIdTrailer,
+           maxPixels: 1e9,
+          scale: (30),
+          region: r,
+          crs: ('EPSG:4674'),
+          folder: 'GEE_L5'
+        });
+      }
+    }),
+        button1: ui.Button({ 
+      label: 'L8 Export (RUN TASK)',
+      // React to the button's click event.
+      onClick: function() {
+        // Select the full image id.
+        var imageIdTrailer1 = app.picker.select1.getValue();
+        var imageId1 = app.COLLECTION_ID1 + '/' + imageIdTrailer1;
+        // Get the visualization options.
+        var visOption1 = app.VIS_OPTIONS1[app.vis.select1.getValue()];
+        // Export the image to Drive.
+        var bb =  ee.List(map1.getBounds()) 
+        var r = ee.Geometry.Rectangle([[bb.get(0),bb.get(1)],[bb.get(2),bb.get(3)]])
+        
+        Export.image.toDrive({
+          image: ee.Image(imageId1).select(visOption1.visParams.bands),
+          description: 'L8_Export-' + imageIdTrailer1,
+          scale: (30),
+          region:r,
+          crs: ('EPSG:4674'),
+          maxPixels: 1e9,
+          folder: 'GEE_L8'
+        });
+      }
+    }),
+    button2: ui.Button({
+      label: 'S2 Export (RUN TASK)',
+      // React to the button's click event.
+      onClick: function() {
+        
+      //////////////////////////////////////////////////////////////////////////////
+      var imageId2 = app.picker.select2.getValue();
+        if (imageId2) {
+        // If an image id is found, create an image.
+        var image = ee.Image(app.COLLECTION_ID2 + '/' + imageId2);
+        var layer;
+
+          if (app.vis.select2.getValue() === 'S2: NDVI (B8-B4/B8+B4)') {
+            layer = s2ndvi(image);
+          } else {
+            layer = image;
+          }
+    }
+      //////////////////////////////////////////////////////////////////////////////  
+        // Get the visualization options.
+        var visOption2 = app.VIS_OPTIONS2[app.vis.select2.getValue()];
+        // Export the image to Drive.
+        var bb =  ee.List(map1.getBounds()) 
+        var r = ee.Geometry.Rectangle([[bb.get(0),bb.get(1)],[bb.get(2),bb.get(3)]])
+        
+        Export.image.toDrive({
+          image: layer.select(visOption2.visParams.bands),
+          description: 'S2_Export-' + imageId2,
+          scale: 10,
+          region:r,
+          crs: ('EPSG:4674'),
+          maxPixels: 1e9,
+          folder: 'GEE_S2'
+        });
+      }
+    }),
+     button3: ui.Button({ 
+      label: 'S1 Export (RUN TASK)',
+      // React to the button's click event.
+      onClick: function() {
+        // Select the full image id.
+        var imageIdTrailer3 = app.picker.select3.getValue();
+        var imageId3 = app.COLLECTION_ID3 + '/' + imageIdTrailer3;
+        // Get the visualization options.
+        var visOption3 = app.VIS_OPTIONS3[app.vis.select3.getValue()];
+        // Export the image to Drive.
+        var bb =  ee.List(map1.getBounds()) 
+        var r = ee.Geometry.Rectangle([[bb.get(0),bb.get(1)],[bb.get(2),bb.get(3)]])
+        
+        Export.image.toDrive({
+          image: ee.Image(imageId3).select(visOption3.visParams.bands),
+          description: 'S1_Export-' + imageIdTrailer3,
+          scale: (10),
+          region: r,
+          crs: ('EPSG:4674'),
+          maxPixels: 1e9,
+          folder: 'GEE_S1'
+        });
+      }
+    })
+  };
+
+  /* The panel for the export section with corresponding widgets. */
+  app.export.panel = ui.Panel({
+    widgets: [
+      ui.Label('4) Criar tarefa de exportação (S1, S2, L5 e L8)', {fontWeight: 'bold'}),
+      app.export.button,
+      app.export.button1,
+      app.export.button2,
+      app.export.button3
+
+    ],
+    style: app.SECTION_STYLE
+  });
+};
+
+/** Creates the app helper functions. */
+app.createHelpers = function() 
+{
+  /**
+   * Enables or disables loading mode.
+   * @param {boolean} enabled Whether loading mode is enabled.
+   */
+  app.setLoadingMode = function(enabled) {
+    // Set the loading label visibility to the enabled mode.
+    app.filters.loadingLabel.style().set('shown', enabled);
+    // Set each of the widgets to the given enabled mode.
+    var loadDependentWidgets = [
+      app.vis.select,
+      app.filters.startDate,
+      app.filters.endDate,
+      app.filters.startDate1,       //
+      app.filters.endDate1, 
+      app.filters.startDate2,       //
+      app.filters.endDate2,
+      app.filters.startDate3,       //
+      app.filters.endDate3,//
+      app.filters.applyButton,
+      app.filters.applyButtonlonlat,
+      app.filters.byPathRow,
+      //app.filters.lonlat,
+      app.picker.select,
+      app.picker.select1,           //
+      app.picker.select2,
+      app.picker.select3,//
+      app.picker.centerButton,
+      app.export.button,
+      app.export.button1,            //
+      app.export.button2,
+      app.export.button3//
+    ];
+    loadDependentWidgets.forEach(function(widget) {
+      widget.setDisabled(enabled);
+    });
+  };
+
+  /** Applies the selection filters currently selected in the UI. */
+  app.applyFilters = function() {
+    app.setLoadingMode(true);
+    var filtered = ee.ImageCollection(app.COLLECTION_ID);
+    var filtered1 = ee.ImageCollection(app.COLLECTION_ID1);
+    var filtered2 = ee.ImageCollection(app.COLLECTION_ID2);
+    var filtered3 = ee.ImageCollection(app.COLLECTION_ID3).filterMetadata('instrumentMode','equals','IW');
+
+    // Set filter variables. 
+    var start = app.filters.startDate.getValue();
+    var start1 = app.filters.startDate1.getValue();
+    var start2 = app.filters.startDate2.getValue();
+    var start3 = app.filters.startDate3.getValue();
+
+    if (start) start = ee.Date(start);
+    var end = app.filters.endDate.getValue();
+    var end1 = app.filters.endDate1.getValue();
+    var end2 = app.filters.endDate2.getValue();
+    var end3 = app.filters.endDate3.getValue();
+    
+    if (end) end = ee.Date(end);
+    if (start) filtered = filtered.filterDate(start, end);
+    if (start1) filtered1 = filtered1.filterDate(start1, end1);
+    if (start2) filtered2 = filtered2.filterDate(start2, end2);
+    if (start3) filtered3 = filtered3.filterDate(start3, end3);
+
+  
+  
+    var path = app.filters.wrsPath.getValue();
+    var row  = app.filters.wrsRow.getValue();
+    
+    // Filter Path/Row to the map if the checkbox is marked.
+    if (app.filters.byPathRow.getValue()) {
+      print(path,row);
+      filtered = filtered.filter([
+          ee.Filter.eq('WRS_PATH', ee.Number.parse(path)),
+          ee.Filter.eq('WRS_ROW', ee.Number.parse(row))]);      print(filtered);                   
+     filtered1 = filtered1.filter([
+         ee.Filter.eq('WRS_PATH', ee.Number.parse(path)),
+         ee.Filter.eq('WRS_ROW', ee.Number.parse(row))]);      print(filtered1);          
+    } else {
+      filtered = filtered.filterBounds(map1.getCenter())
+      filtered1 = filtered1.filterBounds(map1.getCenter())
+            filtered2 = filtered2.filterBounds(map1.getCenter())
+            filtered3 = filtered3.filterBounds(map1.getCenter())
+      } 
+      
+    // Get the list of computed ids.
+    var computedIds = filtered
+                       .limit(app.IMAGE_COUNT_LIMIT)
+                       .reduceColumns(ee.Reducer.toList(), ['system:index'])
+                       .get('list');
+    var computedIds1 = filtered1
+                      .limit(app.IMAGE_COUNT_LIMIT)
+                      .reduceColumns(ee.Reducer.toList(), ['system:index'])
+                      .get('list');
+    var computedIds2 = filtered2
+                      .limit(app.IMAGE_COUNT_LIMIT)
+                      .reduceColumns(ee.Reducer.toList(), ['system:index'])
+                      .get('list');
+    var computedIds3 = filtered3
+                      .limit(app.IMAGE_COUNT_LIMIT)
+                      .reduceColumns(ee.Reducer.toList(), ['system:index'])
+                      .get('list');
+    computedIds.evaluate(function(ids) {
+      // Update the image picker with the given list of ids.
+      app.setLoadingMode(false);
+      app.picker.select.items().reset(ids);
+      //app.picker.select1.items().reset(ids);
+
+      // Default the image picker to the first id.
+      app.picker.select.setValue(app.picker.select.items().get(0));
+      //app.picker.select1.setValue(app.picker.select1.items().get(0));
+    })
+ 
+      computedIds1.evaluate(function(ids) {
+    // Update the image picker with the given list of ids.
+    app.setLoadingMode(false);
+    app.picker.select1.items().reset(ids);
+    // Default the image picker to the first id.
+    app.picker.select1.setValue(app.picker.select1.items().get(0));
+    });
+    
+     computedIds2.evaluate(function(ids) {
+    // Update the image picker with the given list of ids.
+    app.setLoadingMode(false);
+    app.picker.select2.items().reset(ids);
+    // Default the image picker to the first id.
+    app.picker.select2.setValue(app.picker.select2.items().get(0));
+    });
+    
+     computedIds3.evaluate(function(ids) {
+    // Update the image picker with the given list of ids.
+    app.setLoadingMode(false);
+    app.picker.select3.items().reset(ids);
+    // Default the image picker to the first id.
+    app.picker.select3.setValue(app.picker.select3.items().get(0));
+    });
+   };
+   
+   
+   
+   
+  app.applyFilterslonlat = function(){
+      var l = ee.Number.parse(app.filters.lon.getValue()).float().getInfo()
+      var l2 = ee.Number.parse(app.filters.lat.getValue()).float().getInfo()
+      print(l)
+      map1.setCenter( l,l2, 13);}
+  /** Refreshes the current map layer based on the UI widget states. */
+  app.refreshMapLayer = function() {
+    map1.clear().setControlVisibility({all:false,layerList:true});
+
+    var imageId = app.picker.select.getValue();
+    var imageId1 = app.picker.select1.getValue();
+
+    if (imageId) { 
+      // If an image id is found, create an image.
+      var image = ee.Image(app.COLLECTION_ID + '/' + imageId);
+      // Add the image to the map with the corresponding visualization options.
+      var visOption = app.VIS_OPTIONS[app.vis.select.getValue()];
+      map1.add(ui.Label('Landsat 5 : '+ imageId.slice(12,16)
+                                      +'-'
+                                      +imageId.slice(16,18)
+                                      +'-'
+                                      +imageId.slice(18,20)
+                                    ))
+      map1.addLayer(image, visOption.visParams, imageId);
+      
+    }
+   
+// bloco comentado: adiciona possibilita adicionar um shapefile
+      
+      
+  ///// FIM ADICIONAR SHAPEFILE
+  ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+      }
+      
+  app.refreshMapLayer1 = function() {
+    map2.clear().setControlVisibility({all:false,layerList:true});
+    
+    var imageId1 = app.picker.select1.getValue();
+
+    
+    if (imageId1) {
+      // If an image id is found, create an image.
+      var image1 = ee.Image(app.COLLECTION_ID1 + '/' + imageId1);
+      // Add the image to the map with the corresponding visualization options.
+      var visOption1 = app.VIS_OPTIONS1[app.vis.select1.getValue()];
+      map2.add(ui.Label('Landsat 8 :  '+ imageId1.slice(12,16)
+                                      +'-'
+                                      +imageId1.slice(16,18)
+                                      +'-'
+                                      +imageId1.slice(18,20)
+                                    ))
+      map2.addLayer(image1, visOption1.visParams, imageId1);
+    }
+// bloco comentado: adiciona possibilita adicionar um shapefile
+      
+     
+  ///// FIM ADICIONAR SHAPEFILE
+      }
+   
+ ///////////////////////////////map3: start///////////////////////////////////////
+  app.refreshMapLayer2 = function() {
+    map4.clear().setControlVisibility({all:false,layerList:true});
+       
+
+    var imageId2 = app.picker.select2.getValue();
+    if (imageId2) {
+      // If an image id is found, create an image.
+      var image = ee.Image(app.COLLECTION_ID2 + '/' + imageId2);
+      var layer;
+
+      if (app.vis.select2.getValue() === 'S2: NDVI (B8-B4/B8+B4)') {
+        layer = s2ndvi(image);
+      } else {
+        layer = image;
+      }
+      // Add the image to the map with the corresponding visualization options.
+      var visOption2 = app.VIS_OPTIONS2[app.vis.select2.getValue()];
+
+      map4.add(ui.Label('Sentinel 2:  '+ imageId2.slice(0,4)
+                                      +'-'
+                                      +imageId2.slice(4,6)
+                                      +'-'
+                                      +imageId2.slice(6,8)
+      
+                                  ))
+      map4.addLayer(layer, visOption2.visParams, imageId2);
+   
+      
+    // bloco comentado: adiciona possibilita adicionar um shapefile
+      
+   //// FIM ADICIONAR SHAPEFILE
+    }
+  };
+  app.refreshMapLayer3 = function() {
+    map3.clear().setControlVisibility({all:false,layerList:true});
+    
+    var imageId3 = app.picker.select3.getValue();
+
+    
+    if (imageId3) {
+      // If an image id is found, create an image.
+      var image3 = ee.Image(app.COLLECTION_ID3 + '/' + imageId3);
+      // Add the image to the map with the corresponding visualization options.
+      var visOption3 = app.VIS_OPTIONS3[app.vis.select3.getValue()];
+      map3.add(ui.Label('Sentinel 1 :  '+ imageId3.slice(17,21)
+                                        +'-'
+                                        +imageId3.slice(21,23)
+                                        +'-'
+                                         +imageId3.slice(23,25)
+                                    ))
+      map3.addLayer(image3, visOption3.visParams, imageId3);
+    }
+// bloco comentado: adiciona possibilita adicionar um shapefile
+      
+     
+  ///// FIM ADICIONAR SHAPEFILE
+      }
+ 
+ ///////////////////////////////map3: end///////////////////////////////////////
+ 
+ 
+ 
+ 
+    }; //mantem
+//adding NDVI for sentinel2 
+function s2ndvi(image){
+  var ndvi = image.normalizedDifference(['B8', 'B4']);
+  return image.addBands(ndvi);
+}
+var palette = [ 'FFFFFF', 'CE7E45', 'DF923D', 'F1B555', 'FCD163', '99B718',
+               '74A901', '66A000', '529400', '3E8601', '207401', '056201',
+               '004C00', '023B01', '012E01', '011D01', '011301'];
+               
+
+
+/** Creates the app constants. */
+app.createConstants = function() {
+  app.COLLECTION_ID = 'LANDSAT/LT05/C01/T1_TOA';
+  app.COLLECTION_ID1 = 'LANDSAT/LC08/C01/T1_RT_TOA';
+  app.COLLECTION_ID2 = 'COPERNICUS/S2';
+  app.COLLECTION_ID3 = 'COPERNICUS/S1_GRD';
+
+  app.SECTION_STYLE = {margin: '20px 0 0 0'};
+  app.HELPER_TEXT_STYLE = {
+      margin: '8px 0 -3px 8px',
+      fontSize: '12px',
+      color: 'gray'
+  };
+  app.IMAGE_COUNT_LIMIT = 50;
+  app.VIS_OPTIONS = {
+    'L5: Falsa cor (B5/B4/B3)': {
+      description: 'Vegetação aparece em tons avermelhados, áreas urbanas como ' +
+                   'azul claro, solos expostos como marrons.',
+      visParams: {gamma: 1.3, min: -0, max: 0.5, bands: ['B5', 'B4', 'B3']}
+    },
+    'L5: Cor natural (B3/B2/B1)': {
+      description: 'Feições e objetos aparecem similares à ' +
+                   'sua aparencia ao olho humano.',
+      visParams: {gamma: 1.3, min: -0, max: 0.5, bands: ['B3', 'B2', 'B1']}
+    },
+    'L5: Atmosférica (B7/B6/B5)': {
+      description: 'Linhas de costa e litoral bem definidos. ' +
+                   'Vegetação em tons de azul.',
+      visParams: {gamma: 1.3, min: -0, max: 0.5, bands: ['B7', 'B6', 'B5']}
+    }
+  };
+  app.VIS_OPTIONS1 = {
+    'L8: Falsa cor (B6/B5/B4)': {
+      description: 'Vegetação aparece em tons avermelhados, áreas urbanas como ' +
+                   'azul claro, solos expostos como marrons.',
+      visParams: {gamma: 1.3, min: -0, max: 0.5, bands: ['B6', 'B5', 'B4']}
+    },
+    'L8: Cor natural (B4/B3/B2)': {
+      description: 'Feições e objetos aparecem similares à ' +
+                   'sua aparencia ao olho humano.',
+      visParams: {gamma: 1.3, min: -0, max: 0.5, bands: ['B4', 'B3', 'B2']}
+    },
+    'L8: Atmosférica (B7/B6/B5)': {
+      description: 'Linhas de costa e litoral bem definidos. ' +
+                   'Vegetação em tons de azul.',
+      visParams: {gamma: 1.3, min: -0, max: 0.5, bands: ['B7', 'B6', 'B5']}
+    }
+  }
+   app.VIS_OPTIONS2 = {
+    'S2: Natural color w/NIR (B4/B8/B3)': {
+      description: 'Ground features appear in colors similar to their ' +
+                   'appearance to the human visual system.',
+      visParams: {gamma: 1.0, min: [283,490,513], max: [1685,4468,1800], bands: ['B4', 'B8', 'B3']}
+    },
+    'S2: Natural color w/NIR streched (B4/B8/B3)': {
+      description: 'Natural color streched to stress forest ' +
+                   'degradation and illegal logging.',
+      visParams: {gamma: 1.0, min: [221,838,418], max: [845,4758,1070], bands: ['B4', 'B8', 'B3']}
+    },
+    'S2: False color (B5/B4/B3)': {
+      description: 'Vegetation is shades of red, urban areas are ' +
+                   'cyan blue, and soils are browns.',
+      visParams: {gamma: 1, min: 100, max: 2500, bands: ['B5', 'B4', 'B3']}
+    },
+    'S2: Natural color (B4/B3/B2)': {
+      description: 'Ground features appear in colors similar to their ' +
+                   'appearance to the human visual system.',
+      visParams: {gamma: 1.3, min: 500, max: 7000, bands: ['B4', 'B3', 'B2']}
+    },
+    'S2: Color Infrared (B8/B4/B3)': {
+      description: 'Coast lines and shores are well-defined. ' +
+                   'Vegetation appears blue.',
+      visParams: {gamma: 1.3, min: 500, max: 7000, bands: ['B8', 'B4', 'B3']}
+    },
+    'S2: Agriculture (B11/B8A/B2)': {
+      description: 'Vegetation features appear in greens  ' +
+                   'humidity in blues.',
+      visParams: {gamma: 1.3, min: 500, max: 7000, bands: ['B11', 'B8A', 'B2']}
+    },
+    'S2: SWIR (B12/B8/B4)': {
+      description: 'Vegetation features appear in greens  ' +
+                   'humidity in blues.',
+      visParams: {gamma: 1.3, min: 500, max: 7000, bands: ['B12', 'B8', 'B4']}
+    },
+    'S2: NDVI (B8-B4/B8+B4)': {
+      description: 'Vegetation index  ' +
+                   '',
+      visParams:  {min: 0, max: 0.7,  palette:palette, bands: ['nd']}
+    },
+    
+    
+  };
+  app.VIS_OPTIONS3 = {
+    'S1: VV': {
+      description: 'VV' +
+                   'banda',
+      visParams: { bands: ['VV'] ,min:-30, max: -5}
+    },
+    'S1: VH': {
+      description: 'VH' +
+                   'banda',
+      visParams: { bands: ['VH'] ,min:-30, max: -5}
+    
+    }
+  }
+};
+
+var mapGrid = ui.Panel(
+    [
+      ui.Panel([map1, map3], null, {stretch: 'both'}),
+      ui.Panel([map2, map4], null, {stretch: 'both'})
+    ],
+    ui.Panel.Layout.Flow('horizontal'), {stretch: 'both'});
+
+
+/** Creates the application interface. */
+app.boot = function() 
+{
+  app.createConstants();
+  app.createHelpers();
+  app.createPanels();
+  var main = ui.Panel({
+    widgets: [
+      app.intro.panel,
+      app.filters.panel,
+      app.picker.panel,
+      app.vis.panel,
+      app.export.panel
+    ],
+    style: {width: '320px', padding: '8px'}
+  });
+  ui.root.clear()// adicionei p/ limpar tudo, mostra so a janela
+  ui.root.insert(0, main)
+ ui.root.insert(1,mapGrid)
+ 
+//  ui.root.insert(1, map1)
+//  ui.root.insert(2, map2);
+  map1.setCenter(-47.899387, -15.783436, 12);
+  app.applyFilters();
+};
+
+app.boot();
