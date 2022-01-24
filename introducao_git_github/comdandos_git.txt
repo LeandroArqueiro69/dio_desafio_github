@@ -1,0 +1,4 @@
+git stauts > verifica se tem alguma alteração 
+git add . > adiciona meus novos arquivos 
+git commit -m "comentário" adiciona meus novos arquivos e/ou alterações
+git push origin main > faz a transferencia para meu repositorio no Github  
